@@ -24,12 +24,13 @@ export const ChatBot = () => {
       console.log("Response: ", res.data);
       const currentTemperature = res.data.currentTemperature.main.temp;
       const upcomingDaysTemperature = res.data.temperatureInUpcomingDays;
+      const response = res.data.response;
       console.log("Upcoming days temperature", upcomingDaysTemperature);
       console.log("Current temperature", currentTemperature);
-      const botReply =
-        Math.round(currentTemperature - 273).toFixed(2) ||
-        "Sorry, I couldn't find that.";
-      const botMsg = { from: "bot", text: botReply };
+      // const botReply =
+      //   Math.round(currentTemperature - 273).toFixed(2) ||
+      //   "Sorry, I couldn't find that.";
+      const botMsg = { from: "bot", text: response };
 
       setMessages((prev: any) => [...prev, botMsg]);
     } catch (err) {
