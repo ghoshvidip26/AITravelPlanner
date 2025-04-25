@@ -56,14 +56,14 @@ export const ChatBot = () => {
         className="fixed right-12 bottom-[calc(1rem)] hover:cursor-pointer"
       />
       {showChat && (
-        <div className="fixed right-12 bottom-[calc(5rem)] hover:cursor-pointer p-5 shadow-md shadow-amber-50 h-full w-96">
+        <div className="fixed bottom-[calc(5rem)] hover:cursor-pointer p-5 shadow-md shadow-amber-50 h-full w-full">
           <div className="flex flex-col h-full">
             <div>
               <h2 className="font-semibold text-lg tracking-tight">Chatbot</h2>
               <p className="text-white">AI Travel planner</p>
             </div>
 
-            <div className="flex-1 overflow-y-auto space-y-2 px-1">
+            <div className="flex-1 overflow-y-auto mt-auto space-y-2 px-1">
               {messages.length === 0 ? (
                 <p className="text-gray-400 text-center mt-10">
                   Start the conversation to plan your next trip ✈️
@@ -97,7 +97,7 @@ export const ChatBot = () => {
                 placeholder="Type your destination..."
               />
               <button
-                type="submit" // Ensures button works as form submit
+                type="submit"
                 className="mt-2 py-2 px-4 bg-purple-600 text-white rounded-lg"
               >
                 Send
