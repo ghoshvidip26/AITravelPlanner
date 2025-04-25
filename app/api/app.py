@@ -88,13 +88,14 @@ def predictFutureTemp(city):
         print("Request failed:", e)
     return temp_map
 
-def extractCity(query): 
+def extractCity(query):
     doc = nlp(query)
     for ent in doc.ents:
         if ent.label_ == 'GPE':
             print("Extracted GPE:", ent.text)
             return ent.text
     if len(query.strip().split()) == 1:
+        print("Extracted City (Single word query):", query.strip())
         return query.strip()
     return None
 
@@ -116,60 +117,84 @@ def summarize_forecast(temp_map):
     return "\n".join(forecast_summary.strip())
 
 @app.route('/weather', methods=['POST'])
-def predict():   
-    data = request.get_json()
-    query = data.get('newMessage')  
-    city = extractCity(query)
-    if not city:
-        return jsonify({"error": "City not found in the query."}), 400
-    print("City found: ",city)
-    currentTemp = callAPI(city)  
-    temp_map = predictFutureTemp(city)
-    forecast_summary = summarize_forecast(temp_map)
-    
-    documents = [
-        f"Weather in {city}: {currentTemp['weather'][0]['main']}, "
-        f"Temperature: {round(currentTemp['main']['temp'] - 273, 2)}°C, "
-        f"Feels like: {round(currentTemp['main']['feels_like'] - 273, 2)}°C, "
-        f"Latitude: {currentTemp['coord']['lat']}, Longitude: {currentTemp['coord']['lon']}. "
-        f"\nHere's the 5-day forecast for {city}: {forecast_summary}\n"
-    ]
-    DB_NAME="weatherdb"
-    embed_fn=GeminiEmbeddingFunction()
-    embed_fn.document_mode=True
+def predict():
+    try:
+        data = request.get_json()
+        query = data.get('newMessage')  
+        
+        # Extract the city dynamically from the user's query
+        city = extractCity(query)
+        
+        if not city:
+            return jsonify({"error": "City not found in the query. Please mention a valid city."}), 400
+        
+        print(f"City found: {city}")
+        
+        # Fetch the current temperature for the extracted city
+        currentTemp = callAPI(city)
+        if not currentTemp:
+            return jsonify({"error": f"Could not retrieve current temperature for {city}."}), 500
 
-    chroma_client=chromadb.Client()
-    db = chroma_client.get_or_create_collection(name=DB_NAME, embedding_function=embed_fn)
-    db.add(documents=documents, ids=[str(i) for i in range(len(documents))])
-    embed_fn.document_mode=False
-    
-    result=db.query(query_texts=[query],n_results=1)
-    [all_passages]=result["documents"]
-    query_oneline = query.replace("\n", " ")
-    
-    prompt = f"""
-    You are a helpful and friendly assistant that answers questions based on the reference passage below using **plain text** without Markdown formatting. 
-    When answering, please keep in mind that the person you're talking to may not be familiar with technical terms, 
-    so break things down in a simple, conversational way. Feel free to provide context and background to make sure the 
-    answer is thorough and clear. If the passage doesn't help with answering the question, you can leave it out.
+        # Predict the future temperature for the city
+        temp_map = predictFutureTemp(city)
+        if not temp_map:
+            return jsonify({"error": f"Could not retrieve forecast data for {city}."}), 500
 
-    QUESTION: {query_oneline}
-    """
-    
-    for passage in all_passages: 
-        passage_oneline=passage.replace("\n"," ")
-        prompt += f"PASSAGE: {passage_oneline}\n"
-    answer = client.models.generate_content(
-    model="gemini-2.0-flash",
-    contents=prompt)
-    print("Upcoming temperatures:", forecast_summary)
-    return jsonify({
-        "currentTemperature": currentTemp,
-        "temperatureInUpcomingDays": temp_map,
-        "response": answer.text,
-        "extractedCity": city
-    })
+        forecast_summary = summarize_forecast(temp_map)
 
+        # Generate the document for Chroma DB
+        documents = [
+            f"Weather in {city}: {currentTemp['weather'][0]['main']}, "
+            f"Temperature: {round(currentTemp['main']['temp'] - 273, 2)}°C, "
+            f"Feels like: {round(currentTemp['main']['feels_like'] - 273, 2)}°C, "
+            f"Latitude: {currentTemp['coord']['lat']}, Longitude: {currentTemp['coord']['lon']}. "
+            f"\nHere's the 5-day forecast for {city}: {forecast_summary}\n"
+        ]
+        
+        DB_NAME = "weatherdb"
+        embed_fn = GeminiEmbeddingFunction()
+        embed_fn.document_mode = True
+
+        chroma_client = chromadb.Client()
+        db = chroma_client.get_or_create_collection(name=DB_NAME, embedding_function=embed_fn)
+        
+        db.add(documents=documents, ids=[str(i) for i in range(len(documents))])
+        embed_fn.document_mode = False
+        
+        # Query Chroma DB for relevant passage based on user input
+        result = db.query(query_texts=[query], n_results=1)
+        [all_passages] = result["documents"]
+        
+        query_oneline = query.replace("\n", " ")
+        
+        prompt = f"""
+        You are a helpful and friendly assistant that answers questions based on the reference passage below using **plain text** without Markdown formatting. 
+        When answering, please keep in mind that the person you're talking to may not be familiar with technical terms, 
+        so break things down in a simple, conversational way. Feel free to provide context and background to make sure the 
+        answer is thorough and clear. If the passage doesn't help with answering the question, you can leave it out.
+
+        QUESTION: {query_oneline}
+        """
+        
+        for passage in all_passages: 
+            passage_oneline = passage.replace("\n", " ")
+            prompt += f"PASSAGE: {passage_oneline}\n"
+        
+        answer = client.models.generate_content(model="gemini-2.0-flash", contents=prompt)
+
+        if not answer or not answer.text:
+            return jsonify({"error": "Error generating a response from the AI model."}), 500
+
+        return jsonify({
+            "currentTemperature": currentTemp,
+            "temperatureInUpcomingDays": temp_map,
+            "response": answer.text,
+            "extractedCity": city
+        })
+    
+    except Exception as e:
+        print(f"Error processing request: {str(e)}")
+        return jsonify({"error": f"Internal server error: {str(e)}"}), 500
 
 if __name__ == '__main__':
-    app.run(debug=True,port=3000)
+    app.run(debug=True,port=3001)

@@ -22,7 +22,7 @@ export const ChatBot = () => {
 
     try {
       const res = await axios.post(
-        "http://127.0.0.1:3000/weather",
+        "http://127.0.0.1:3001/weather",
         {
           newMessage: newMessage,
         },
@@ -82,7 +82,13 @@ export const ChatBot = () => {
               )}
             </div>
 
-            <div className="flex flex-row mt-2 space-x-2">
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                handleSendMessage();
+              }}
+              className="flex flex-row mt-2 space-x-2"
+            >
               <input
                 type="text"
                 value={newMessage}
@@ -91,12 +97,12 @@ export const ChatBot = () => {
                 placeholder="Type your destination..."
               />
               <button
-                onClick={handleSendMessage}
+                type="submit" // Ensures button works as form submit
                 className="mt-2 py-2 px-4 bg-purple-600 text-white rounded-lg"
               >
                 Send
               </button>
-            </div>
+            </form>
           </div>
         </div>
       )}
