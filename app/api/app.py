@@ -92,8 +92,10 @@ def extractCity(query):
     doc = nlp(query)
     for ent in doc.ents:
         if ent.label_ == 'GPE':
-            print(ent.text)
+            print("Extracted GPE:", ent.text)
             return ent.text
+    if len(query.strip().split()) == 1:
+        return query.strip()
     return None
 
 def summarize_forecast(temp_map):
@@ -164,8 +166,10 @@ def predict():
     return jsonify({
         "currentTemperature": currentTemp,
         "temperatureInUpcomingDays": temp_map,
-        "response": answer.text
+        "response": answer.text,
+        "extractedCity": city
     })
+
 
 if __name__ == '__main__':
     app.run(debug=True,port=3000)

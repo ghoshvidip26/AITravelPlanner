@@ -4,11 +4,13 @@ import { useState } from "react";
 import UserMessage from "@/components/ChatBot/UserMessage";
 import BotMessage from "@/components/ChatBot/BotMessage";
 import axios from "axios";
+import TypingIndicator from "./TypingIndicator";
 
 export const ChatBot = () => {
   const [showChat, setShowChat] = useState(true);
   const [messages, setMessages] = useState<any>([]);
   const [newMessage, setNewMessage] = useState("");
+  const [isTyping, setIsTyping] = useState(false);
 
   const handleSendMessage = async () => {
     if (!newMessage.trim()) return;
@@ -16,20 +18,22 @@ export const ChatBot = () => {
     const userMsg = { from: "user", text: newMessage };
     setMessages((prev: any) => [...prev, userMsg]);
     setNewMessage("");
+    setIsTyping(true);
 
     try {
-      const res = await axios.post("http://127.0.0.1:3000/weather", {
-        newMessage: newMessage,
-      });
-      console.log("Response: ", res.data);
-      const currentTemperature = res.data.currentTemperature.main.temp;
-      const upcomingDaysTemperature = res.data.temperatureInUpcomingDays;
+      const res = await axios.post(
+        "http://127.0.0.1:3000/weather",
+        {
+          newMessage: newMessage,
+        },
+        {
+          headers: {
+            "Content-Type": "application/json",
+          },
+        }
+      );
+
       const response = res.data.response;
-      console.log("Upcoming days temperature", upcomingDaysTemperature);
-      console.log("Current temperature", currentTemperature);
-      // const botReply =
-      //   Math.round(currentTemperature - 273).toFixed(2) ||
-      //   "Sorry, I couldn't find that.";
       const botMsg = { from: "bot", text: response };
 
       setMessages((prev: any) => [...prev, botMsg]);
@@ -39,9 +43,9 @@ export const ChatBot = () => {
         ...prev,
         { from: "bot", text: "Error fetching data. Please try again!" },
       ]);
+    } finally {
+      setIsTyping(false);
     }
-
-    setNewMessage("");
   };
 
   return (
@@ -52,7 +56,7 @@ export const ChatBot = () => {
         className="fixed right-12 bottom-[calc(1rem)] hover:cursor-pointer"
       />
       {showChat && (
-        <div className="fixed right-12 bottom-[calc(5rem)] hover:cursor-pointer p-5 shadow-md shadow-amber-50 h-[474px] w-[500px]">
+        <div className="fixed right-12 bottom-[calc(5rem)] hover:cursor-pointer p-5 shadow-md shadow-amber-50 h-full w-96">
           <div className="flex flex-col h-full">
             <div>
               <h2 className="font-semibold text-lg tracking-tight">Chatbot</h2>
@@ -65,13 +69,16 @@ export const ChatBot = () => {
                   Start the conversation to plan your next trip ✈️
                 </p>
               ) : (
-                messages.map((msg: any, index: number) =>
-                  msg.from === "user" ? (
-                    <UserMessage key={index} newMessage={msg.text} />
-                  ) : (
-                    <BotMessage key={index} botMessage={msg.text} />
-                  )
-                )
+                <>
+                  {messages.map((msg: any, index: number) =>
+                    msg.from === "user" ? (
+                      <UserMessage key={index} newMessage={msg.text} />
+                    ) : (
+                      <BotMessage key={index} botMessage={msg.text} />
+                    )
+                  )}
+                  {isTyping && <TypingIndicator />}{" "}
+                </>
               )}
             </div>
 
