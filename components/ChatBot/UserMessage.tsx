@@ -12,7 +12,7 @@ const UserMessage = ({ newMessage }: UserMessageProps) => {
         {newMessage}
         <div className="text-right">
           <span className="text-xs text-white opacity-90">
-            {date.toLocaleTimeString().slice(0, 5)}
+            {date.toLocaleTimeString().slice(0, 4)}
           </span>
         </div>
       </div>

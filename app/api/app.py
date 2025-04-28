@@ -54,6 +54,8 @@ def callAPI(city):
     sunrise = datetime.fromtimestamp(response["sys"]["sunrise"]).strftime('%H:%M:%S')
     sunset = datetime.fromtimestamp(response["sys"]["sunset"]).strftime('%H:%M:%S')
 
+    print("API response for", city, ":", response)
+
     return response
 class GeminiEmbeddingFunction(EmbeddingFunction): 
     def __init__(self, document_mode=True):
@@ -158,6 +160,10 @@ def predict():
         chroma_client = chromadb.Client()
         db = chroma_client.get_or_create_collection(name=DB_NAME, embedding_function=embed_fn)
         
+        all_ids = db.get()['ids']
+        if all_ids:
+            db.delete(ids=all_ids)
+
         db.add(documents=documents, ids=[str(i) for i in range(len(documents))])
         embed_fn.document_mode = False
         
@@ -171,7 +177,7 @@ def predict():
         You are a helpful and friendly assistant that answers questions based on the reference passage below using **plain text** without Markdown formatting. 
         When answering, please keep in mind that the person you're talking to may not be familiar with technical terms, 
         so break things down in a simple, conversational way. Feel free to provide context and background to make sure the 
-        answer is thorough and clear. If the passage doesn't help with answering the question, you can leave it out.
+        answer is thorough and clear. If the passage doesn't help with answering the question, you should clearly state that you don't have information about the requested city.
 
         QUESTION: {query_oneline}
         """

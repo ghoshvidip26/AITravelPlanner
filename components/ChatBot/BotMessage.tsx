@@ -16,7 +16,7 @@ const BotMessage = ({ botMessage }: BotMessageProps) => {
         <ReactMarkdown>{botMessage}</ReactMarkdown>
         <div className="text-right">
           <span className="text-xs text-white opacity-90">
-            {date.toLocaleTimeString().slice(0, 5)}
+            {date.toLocaleTimeString().slice(0, 4)}
           </span>
         </div>
       </div>
