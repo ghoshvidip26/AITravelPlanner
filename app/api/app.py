@@ -90,6 +90,14 @@ def predictFutureTemp(city):
         print("Request failed:", e)
     return temp_map
 
+def hotelSearch(cityCode): 
+    url=f"https://test.api.amadeus.com/v1/reference-data/locations/hotels/by-city?cityCode={cityCode}"
+    try: 
+        response = requests.get(url, timeout=10)
+        print("Response: ",response.json())
+    except requests.exceptions.RequestException as e:
+        print("Request failed:", e)
+        
 def extractCity(query):
     doc = nlp(query)
     for ent in doc.ents:
