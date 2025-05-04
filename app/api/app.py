@@ -1,5 +1,6 @@
 from flask import Flask, request, jsonify
 import os
+import re
 from flask_cors import CORS
 import collections
 from google import genai
@@ -25,7 +26,14 @@ collections.Iterable = collections.abc.Iterable
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3' 
 app = Flask(__name__)
 
-CORS(app, resources={r"/*": {"origins": "*"}}, allow_headers=["Content-Type"])
+# Configure CORS to allow credentials and specific headers
+CORS(app, resources={
+    r"/*": {
+        "origins": "*",
+        "supports_credentials": True,
+        "allow_headers": ["Content-Type", "Authorization"]
+    }
+})
 
 client = genai.Client(api_key=GOOGLE_API_KEY)
 
@@ -53,10 +61,8 @@ def callAPI(city):
 
     sunrise = datetime.fromtimestamp(response["sys"]["sunrise"]).strftime('%H:%M:%S')
     sunset = datetime.fromtimestamp(response["sys"]["sunset"]).strftime('%H:%M:%S')
-
-    print("API response for", city, ":", response)
-
     return response
+
 class GeminiEmbeddingFunction(EmbeddingFunction): 
     def __init__(self, document_mode=True):
         self.document_mode = document_mode
@@ -108,19 +114,22 @@ def hotelAPI(cityCode):
     response = requests.get(url, headers=headers).json()
     return response
 
-def airportAPI(cityCode,countryCode): 
-    url=f"https://test.api.amadeus.com/v1/reference-data/locations?subType=CITY,AIRPORT&keyword={cityCode}&countryCode={countryCode}"
+def airportAPI(cityName, countryCode): 
+    url=f"https://test.api.amadeus.com/v1/reference-data/locations?subType=CITY,AIRPORT&keyword={cityName}&countryCode={countryCode}"
     accessToken = obtainAccessToken()
     headers = {"Authorization": f"Bearer {accessToken}"}
     response = requests.get(url, headers=headers).json()
     return response
 
-def tourAndActivities(): 
-    url="https://test.api.amadeus.com/v1/shopping/activities?longitude=-3.69170868&latitude=40.41436995&radius=1"
-    accessToken = obtainAccessToken()
-    headers = {"Authorization": f"Bearer {accessToken}"}
-    response = requests.get(url, headers=headers).json()
-    return response
+def getIATACode(cityName, countryCode):
+    data = airportAPI(cityName, countryCode)
+    location = data.get("data")[0]
+    if location.get("subType")=="CITY": 
+        iataCode = location.get("address").get("cityCode")
+    else: 
+        iataCode = location.get("address").get("countryCode")
+    print("IATA Code:", iataCode)
+    return iataCode
 
 def distance(origin, destination):
     lat1, lon1 = origin
@@ -149,12 +158,14 @@ def findDistanceFromAirport(cityCode, countryCode):
         geoCode = hotel.get("geoCode")
         if name and geoCode:
             tempMap[name] = geoCode
-
+    distance_data = {}
     for name, geo in tempMap.items():
         hotel_coords = (geo['latitude'], geo['longitude'])
         d = distance(airport_coords, hotel_coords)
         print(f"{name}: {d:.2f} km from airport")
-        
+        distance_data[name]=d
+    return distance_data        
+
 def placesOfInterest(region,language,interests):
     url = "https://travel-guide-api-city-guide-top-places.p.rapidapi.com/check"
     queryString = {"noqueue":"1"}
@@ -177,10 +188,26 @@ def extractCity(query):
     for ent in doc.ents:
         if ent.label_ == 'GPE':
             print("Extracted GPE:", ent.text)
-            return ent.text
+            return {"cityName": ent.text}
+    iata_code_match = re.findall(r'\b[A-Z]{3}\b', query)
+    if iata_code_match:
+        iata_code = iata_code_match[0]
+        print("Possible IATA code found in query:", iata_code)
+        country_match = re.findall(r'\b[A-Z]{2}\b', query)
+        print("Possible country code found in query:", country_match)
+        try: 
+            APIResponse = airportAPI(iata_code, country_match[0])
+            data = APIResponse.get("data")
+            for location in data:
+                address=location.get("address")
+                return address
+        except:
+            print("Error in API call for IATA code:", iata_code)
+            return None
+        
     if len(query.strip().split()) == 1:
         print("Extracted City (Single word query):", query.strip())
-        return query.strip()
+        return {"cityName": query.strip()}
     return None
 
 def summarize_forecast(temp_map):
@@ -195,10 +222,9 @@ def summarize_forecast(temp_map):
         min_temp = round(min(temps), 2)
         avg_temp = round(sum(temps) / len(temps), 2)
         
-        forecast_summary += (
-            f"\n{day}: Average {avg_temp}°C, High {max_temp}°C, Low {min_temp}°C\n"
-        )
-    return "\n".join(forecast_summary.strip())
+        forecast_summary += f"{day}: Average {avg_temp}°C, High {max_temp}°C, Low {min_temp}°C"
+
+    return forecast_summary
 
 @app.route('/weather', methods=['POST'])
 def predict():
@@ -207,28 +233,49 @@ def predict():
         query = data.get('newMessage')  
         
         city = extractCity(query)
-        
-        if not city:
+        print("Extracted City:", city)
+        cityName=city.get("cityName")
+        print("Extracted City:", cityName)
+        if not cityName:
             return jsonify({"error": "City not found in the query. Please mention a valid city."}), 400
-        
-        print(f"City found: {city}")
-        
-        currentTemp = callAPI(city)
+                    
+        currentTemp = callAPI(cityName)
         if not currentTemp:
-            return jsonify({"error": f"Could not retrieve current temperature for {city}."}), 500
+            return jsonify({"error": f"Could not retrieve current temperature for {cityName}."}), 500
+        countryCode = currentTemp.get('sys').get('country')
+        print("Country Code:", countryCode)
+        if not countryCode:
+            return jsonify({"error": f"Could not determine country for {cityName}."}), 500
+        cityCode = getIATACode(cityName, countryCode)
+        distanceFromAirport = findDistanceFromAirport(cityCode, countryCode)
+        print("Distance from Airport:", distanceFromAirport)
+        print("City Code:", cityCode)
+        if not cityCode:
+            return jsonify({"error": f"Could not determine IATA code for {cityName}."}), 500
 
-        temp_map = predictFutureTemp(city)
+        temp_map = predictFutureTemp(cityName)
         if not temp_map:
-            return jsonify({"error": f"Could not retrieve forecast data for {city}."}), 500
+            return jsonify({"error": f"Could not retrieve forecast data for {cityName}."}), 500
 
         forecast_summary = summarize_forecast(temp_map)
+        hotelsList = hotelAPI(cityCode)
+        hotelName = []
+        for hotel in hotelsList.get("data"): 
+            hotelName.append({
+                "name": hotel.get("name"),
+                "latitude": hotel.get("geoCode", {}).get("latitude"),
+                "longitude": hotel.get("geoCode", {}).get("longitude")
+            })
 
         documents = [
-            f"Weather in {city}: {currentTemp['weather'][0]['main']}, "
+            f"Weather in {cityName}: {currentTemp['weather'][0]['main']}, "
             f"Temperature: {round(currentTemp['main']['temp'] - 273, 2)}°C, "
             f"Feels like: {round(currentTemp['main']['feels_like'] - 273, 2)}°C, "
             f"Latitude: {currentTemp['coord']['lat']}, Longitude: {currentTemp['coord']['lon']}. "
-            f"\nHere's the 5-day forecast for {city}: {forecast_summary}\n"
+            f"\nHere's the 5-day forecast for {cityName}: {forecast_summary}\n"
+            f"Hotel information in city {cityName}: {hotelName}\n",
+            f"Distance from airport to hotel in {cityName}: {distanceFromAirport} km\n",
+            # f"Places of interest in {city}: {placesOfInterest(cityCode, 'en', 'sightseeing')}\n",
         ]
         
         DB_NAME = "weatherdb"
@@ -269,13 +316,22 @@ def predict():
         if not answer or not answer.text:
             return jsonify({"error": "Error generating a response from the AI model."}), 500
 
-        return jsonify({
-            "currentTemperature": currentTemp,
-            "temperatureInUpcomingDays": temp_map,
-            "response": answer.text,
-            "extractedCity": city
+        response = jsonify({
+            "city": cityName,
+            "countryCode": countryCode,
+            "currentWeather": currentTemp,
+            "forecastSummary": forecast_summary,
+            "hotels": hotelName,
+            "distanceFromAirport": distanceFromAirport,
+            "answer": answer.text
         })
-    
+        
+        # Set CORS headers explicitly
+        response.headers.add('Access-Control-Allow-Origin', '*')
+        response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
+        response.headers.add('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS')
+        return response
+
     except Exception as e:
         print(f"Error processing request: {str(e)}")
         return jsonify({"error": f"Internal server error: {str(e)}"}), 500
