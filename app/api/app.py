@@ -16,7 +16,7 @@ import spacy
 from collections import defaultdict
 nlp = spacy.load('en_core_web_sm')
 from datetime import datetime
-from IPython.display import display, Markdown, Latex
+import math
 
 load_dotenv()
 GOOGLE_API_KEY = os.getenv('GOOGLE_API_KEY')
@@ -90,14 +90,88 @@ def predictFutureTemp(city):
         print("Request failed:", e)
     return temp_map
 
-def hotelSearch(cityCode): 
-    url=f"https://test.api.amadeus.com/v1/reference-data/locations/hotels/by-city?cityCode={cityCode}"
-    try: 
-        response = requests.get(url, timeout=10)
-        print("Response: ",response.json())
-    except requests.exceptions.RequestException as e:
-        print("Request failed:", e)
+def obtainAccessToken(): 
+    url = "https://test.api.amadeus.com/v1/security/oauth2/token"
+    payload = {
+        "grant_type": "client_credentials",
+        "client_id": "RA57nHwp1gG2QPegkGPqHnC2zhmE09CA",          
+        "client_secret": "qCUjQXP9tMOQAKk5"   
+    }
+    headers = {"Content-Type": "application/x-www-form-urlencoded"}
+    response = requests.post(url, data=payload, headers=headers).json()
+    return response.get("access_token")
+
+def hotelAPI(cityCode): 
+    url = f"https://test.api.amadeus.com/v1/reference-data/locations/hotels/by-city?cityCode={cityCode}"
+    accessToken = obtainAccessToken()
+    headers = {"Authorization": f"Bearer {accessToken}"}
+    response = requests.get(url, headers=headers).json()
+    return response
+
+def airportAPI(cityCode,countryCode): 
+    url=f"https://test.api.amadeus.com/v1/reference-data/locations?subType=CITY,AIRPORT&keyword={cityCode}&countryCode={countryCode}"
+    accessToken = obtainAccessToken()
+    headers = {"Authorization": f"Bearer {accessToken}"}
+    response = requests.get(url, headers=headers).json()
+    return response
+
+def tourAndActivities(): 
+    url="https://test.api.amadeus.com/v1/shopping/activities?longitude=-3.69170868&latitude=40.41436995&radius=1"
+    accessToken = obtainAccessToken()
+    headers = {"Authorization": f"Bearer {accessToken}"}
+    response = requests.get(url, headers=headers).json()
+    return response
+
+def distance(origin, destination):
+    lat1, lon1 = origin
+    lat2, lon2 = destination
+    radius = 6371  
+
+    dlat = math.radians(lat2 - lat1)
+    dlon = math.radians(lon2 - lon1)
+    a = (math.sin(dlat / 2) * math.sin(dlat / 2) +
+         math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) *
+         math.sin(dlon / 2) * math.sin(dlon / 2))
+    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+    d = radius * c
+    return d
+
+def findDistanceFromAirport(cityCode, countryCode): 
+    hotels = hotelAPI(cityCode)
+    airport = airportAPI(cityCode,countryCode)
+
+    airportGeoCode = airport.get("data")[0].get("geoCode")
+    airport_coords = (airportGeoCode['latitude'], airportGeoCode['longitude'])
+
+    tempMap = {}
+    for hotel in hotels.get("data", []):
+        name = hotel.get("name")
+        geoCode = hotel.get("geoCode")
+        if name and geoCode:
+            tempMap[name] = geoCode
+
+    for name, geo in tempMap.items():
+        hotel_coords = (geo['latitude'], geo['longitude'])
+        d = distance(airport_coords, hotel_coords)
+        print(f"{name}: {d:.2f} km from airport")
         
+def placesOfInterest(region,language,interests):
+    url = "https://travel-guide-api-city-guide-top-places.p.rapidapi.com/check"
+    queryString = {"noqueue":"1"}
+    payload = {
+        "region": region,
+        "language": language,
+        "interests": interests
+    }
+
+    headers = {
+        "x-rapidapi-key": "dc66c7ea2emsha6c7a2e618149d4p17da80jsn5c1e1cd8cb27",
+        "x-rapidapi-host": "travel-guide-api-city-guide-top-places.p.rapidapi.com",
+        "Content-Type": "application/json"
+    }
+    response = requests.post(url, json=payload, headers=headers,params=queryString)
+    return response.json()
+
 def extractCity(query):
     doc = nlp(query)
     for ent in doc.ents:
@@ -132,7 +206,6 @@ def predict():
         data = request.get_json()
         query = data.get('newMessage')  
         
-        # Extract the city dynamically from the user's query
         city = extractCity(query)
         
         if not city:
@@ -140,19 +213,16 @@ def predict():
         
         print(f"City found: {city}")
         
-        # Fetch the current temperature for the extracted city
         currentTemp = callAPI(city)
         if not currentTemp:
             return jsonify({"error": f"Could not retrieve current temperature for {city}."}), 500
 
-        # Predict the future temperature for the city
         temp_map = predictFutureTemp(city)
         if not temp_map:
             return jsonify({"error": f"Could not retrieve forecast data for {city}."}), 500
 
         forecast_summary = summarize_forecast(temp_map)
 
-        # Generate the document for Chroma DB
         documents = [
             f"Weather in {city}: {currentTemp['weather'][0]['main']}, "
             f"Temperature: {round(currentTemp['main']['temp'] - 273, 2)}°C, "
