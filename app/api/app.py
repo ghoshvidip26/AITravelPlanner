@@ -128,7 +128,7 @@ def getIATACode(cityName, countryCode):
         iataCode = location.get("address").get("cityCode")
     else: 
         iataCode = location.get("address").get("countryCode")
-    print("IATA Code:", iataCode)
+    # print("IATA Code:", iataCode)
     return iataCode
 
 def distance(origin, destination):
@@ -233,9 +233,9 @@ def predict():
         query = data.get('newMessage')  
         
         city = extractCity(query)
-        print("Extracted City:", city)
+        # print("Extracted City:", city)
         cityName=city.get("cityName")
-        print("Extracted City:", cityName)
+        # print("Extracted City:", cityName)
         if not cityName:
             return jsonify({"error": "City not found in the query. Please mention a valid city."}), 400
                     
@@ -243,13 +243,13 @@ def predict():
         if not currentTemp:
             return jsonify({"error": f"Could not retrieve current temperature for {cityName}."}), 500
         countryCode = currentTemp.get('sys').get('country')
-        print("Country Code:", countryCode)
+        # print("Country Code:", countryCode)
         if not countryCode:
             return jsonify({"error": f"Could not determine country for {cityName}."}), 500
         cityCode = getIATACode(cityName, countryCode)
         distanceFromAirport = findDistanceFromAirport(cityCode, countryCode)
-        print("Distance from Airport:", distanceFromAirport)
-        print("City Code:", cityCode)
+        placesToVisit = placesOfInterest(cityCode, 'en', 'sightseeing')
+        print("Places to Visit:", placesToVisit)
         if not cityCode:
             return jsonify({"error": f"Could not determine IATA code for {cityName}."}), 500
 
@@ -260,13 +260,15 @@ def predict():
         forecast_summary = summarize_forecast(temp_map)
         hotelsList = hotelAPI(cityCode)
         hotelName = []
-        for hotel in hotelsList.get("data"): 
+        hotel_data = hotelsList.get("data", [])
+        for hotel in hotel_data:
             hotelName.append({
                 "name": hotel.get("name"),
                 "latitude": hotel.get("geoCode", {}).get("latitude"),
                 "longitude": hotel.get("geoCode", {}).get("longitude")
             })
 
+        # print("Hotel Name:", hotelName)
         documents = [
             f"Weather in {cityName}: {currentTemp['weather'][0]['main']}, "
             f"Temperature: {round(currentTemp['main']['temp'] - 273, 2)}°C, "
@@ -275,7 +277,7 @@ def predict():
             f"\nHere's the 5-day forecast for {cityName}: {forecast_summary}\n"
             f"Hotel information in city {cityName}: {hotelName}\n",
             f"Distance from airport to hotel in {cityName}: {distanceFromAirport} km\n",
-            # f"Places of interest in {city}: {placesOfInterest(cityCode, 'en', 'sightseeing')}\n",
+            f"Places of interest in {city}: {placesToVisit}\n",
         ]
         
         DB_NAME = "weatherdb"
@@ -325,11 +327,6 @@ def predict():
             "distanceFromAirport": distanceFromAirport,
             "answer": answer.text
         })
-        
-        # Set CORS headers explicitly
-        response.headers.add('Access-Control-Allow-Origin', '*')
-        response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
-        response.headers.add('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS')
         return response
 
     except Exception as e:

@@ -33,7 +33,8 @@ export const ChatBot = () => {
         }
       );
 
-      const response = res.data.response;
+      const response = res.data.answer;
+      console.log("Response from server:", response);
       const botMsg = { from: "bot", text: response };
 
       setMessages((prev: any) => [...prev, botMsg]);
