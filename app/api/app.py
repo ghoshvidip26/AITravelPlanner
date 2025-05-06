@@ -96,12 +96,30 @@ def predictFutureTemp(city):
         print("Request failed:", e)
     return temp_map
 
+def flightSearchAPI(): 
+    search_url = "https://test.api.amadeus.com/v2/shopping/flight-offers"
+    accessToken = obtainAccessToken()
+    headers = {"Authorization": f"Bearer {accessToken}"}
+    params = {
+        "originLocationCode": "DEL",
+        "destinationLocationCode": "NAG",
+        "departureDate": "2025-06-01",
+        "returnDate": "2025-06-10",
+        "adults": 1,
+        "nonStop": "true",  
+        "max": 10
+    }
+    response = requests.get(search_url, headers=headers, params=params).json()
+    return response
+
 def obtainAccessToken(): 
     url = "https://test.api.amadeus.com/v1/security/oauth2/token"
+    CLIENT_ID = os.getenv('AMEDUS_API_KEY')
+    CLIENT_SECRET = os.getenv('AMEDUS_API_SECRET')
     payload = {
         "grant_type": "client_credentials",
-        "client_id": "RA57nHwp1gG2QPegkGPqHnC2zhmE09CA",          
-        "client_secret": "qCUjQXP9tMOQAKk5"   
+        "client_id": CLIENT_ID,          
+        "client_secret": CLIENT_SECRET
     }
     headers = {"Content-Type": "application/x-www-form-urlencoded"}
     response = requests.post(url, data=payload, headers=headers).json()
@@ -166,21 +184,18 @@ def findDistanceFromAirport(cityCode, countryCode):
         distance_data[name]=d
     return distance_data        
 
-def placesOfInterest(region,language,interests):
-    url = "https://travel-guide-api-city-guide-top-places.p.rapidapi.com/check"
-    queryString = {"noqueue":"1"}
-    payload = {
-        "region": region,
-        "language": language,
-        "interests": interests
+def predictPrice(departureCity, arrivalCity, departureDate): 
+    url = "https://booking-com18.p.rapidapi.com/flights/v2/min-price-oneway"
+    querystring={
+        "departId":departureCity,
+        "arrivalId":arrivalCity,
+        "departDate":departureDate
     }
-
     headers = {
         "x-rapidapi-key": "dc66c7ea2emsha6c7a2e618149d4p17da80jsn5c1e1cd8cb27",
-        "x-rapidapi-host": "travel-guide-api-city-guide-top-places.p.rapidapi.com",
-        "Content-Type": "application/json"
+        "x-rapidapi-host": "booking-com18.p.rapidapi.com"
     }
-    response = requests.post(url, json=payload, headers=headers,params=queryString)
+    response = requests.get(url, headers=headers, params=querystring)
     return response.json()
 
 def extractCity(query):
