@@ -63,6 +63,25 @@ def callAPI(city):
     sunset = datetime.fromtimestamp(response["sys"]["sunset"]).strftime('%H:%M:%S')
     return response
 
+def fetchCityDetails(): 
+    URL = "https://test.api.amadeus.com/v1/reference-data/locations"
+    accessToken = obtainAccessToken()
+    headers = {
+        "Authorization": f"Bearer {accessToken}"
+    }
+    params = {
+        "keyword": "GOA",
+        "subType": "CITY,AIRPORT"
+    }
+    
+    response = requests.get(URL, headers=headers, params=params)
+
+    if response.status_code == 200:
+        return response.json()
+    else:
+        print(f"Failed to fetch data. Status Code: {response.status_code}, Response: {response.text}")
+        return None
+
 class GeminiEmbeddingFunction(EmbeddingFunction): 
     def __init__(self, document_mode=True):
         self.document_mode = document_mode
@@ -224,6 +243,13 @@ def extractCity(query):
         print("Extracted City (Single word query):", query.strip())
         return {"cityName": query.strip()}
     return None
+
+def fetchPointsOfInterest(lat,long,radius): 
+    url = f"https://test.api.amadeus.com/v1/shopping/activities?longitude={long}&latitude={lat}&radius={radius}"
+    accessToken = obtainAccessToken()
+    headers = {"Authorization": f"Bearer {accessToken}"}
+    response = requests.get(url, headers=headers).json()
+    return response
 
 def summarize_forecast(temp_map):
     daily_temps = defaultdict(list)
