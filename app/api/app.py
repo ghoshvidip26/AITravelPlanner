@@ -20,13 +20,10 @@ from datetime import datetime
 import math
 
 load_dotenv()
-GOOGLE_API_KEY = os.getenv('GOOGLE_API_KEY')
-OPEN_WEATHER_API_KEY = os.getenv('OPEN_WEATHER_API_KEY')
 collections.Iterable = collections.abc.Iterable
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3' 
 app = Flask(__name__)
 
-# Configure CORS to allow credentials and specific headers
 CORS(app, resources={
     r"/*": {
         "origins": "*",
@@ -35,10 +32,10 @@ CORS(app, resources={
     }
 })
 
-client = genai.Client(api_key=GOOGLE_API_KEY)
+client = genai.Client(api_key=os.getenv('GOOGLE_API_KEY'))
 
 def callAPI(city): 
-    url = f"https://api.openweathermap.org/data/2.5/weather?q={city}&appid={OPEN_WEATHER_API_KEY}"
+    url = f"https://api.openweathermap.org/data/2.5/weather?q={city}&appid={os.getenv('OPEN_WEATHER_API_KEY')}"
     response = requests.get(url).json()
 
     if response.get("cod") != 200:
@@ -63,14 +60,14 @@ def callAPI(city):
     sunset = datetime.fromtimestamp(response["sys"]["sunset"]).strftime('%H:%M:%S')
     return response
 
-def fetchCityDetails(): 
+def fetchCityDetails(keyword): 
     URL = "https://test.api.amadeus.com/v1/reference-data/locations"
     accessToken = obtainAccessToken()
     headers = {
         "Authorization": f"Bearer {accessToken}"
     }
     params = {
-        "keyword": "GOA",
+        "keyword": keyword,
         "subType": "CITY,AIRPORT"
     }
     
@@ -101,7 +98,7 @@ class GeminiEmbeddingFunction(EmbeddingFunction):
 
 def predictFutureTemp(city): 
     temp_map = {}
-    url = f"https://api.openweathermap.org/data/2.5/forecast?q={city}&appid={OPEN_WEATHER_API_KEY}&units=metric"
+    url = f"https://api.openweathermap.org/data/2.5/forecast?q={city}&appid={os.getenv('OPEN_WEATHER_API_KEY')}&units=metric"
     try:
         response = requests.get(url, timeout=10)
         print("Status Code:", response.status_code)
@@ -133,12 +130,10 @@ def flightSearchAPI():
 
 def obtainAccessToken(): 
     url = "https://test.api.amadeus.com/v1/security/oauth2/token"
-    CLIENT_ID = os.getenv('AMEDUS_API_KEY')
-    CLIENT_SECRET = os.getenv('AMEDUS_API_SECRET')
     payload = {
         "grant_type": "client_credentials",
-        "client_id": CLIENT_ID,          
-        "client_secret": CLIENT_SECRET
+        "client_id": os.getenv('AMEDUS_API_KEY'),          
+        "client_secret": os.getenv('AMEDUS_API_SECRET')
     }
     headers = {"Content-Type": "application/x-www-form-urlencoded"}
     response = requests.post(url, data=payload, headers=headers).json()
@@ -165,7 +160,6 @@ def getIATACode(cityName, countryCode):
         iataCode = location.get("address").get("cityCode")
     else: 
         iataCode = location.get("address").get("countryCode")
-    # print("IATA Code:", iataCode)
     return iataCode
 
 def distance(origin, destination):
@@ -226,9 +220,7 @@ def extractCity(query):
     iata_code_match = re.findall(r'\b[A-Z]{3}\b', query)
     if iata_code_match:
         iata_code = iata_code_match[0]
-        print("Possible IATA code found in query:", iata_code)
         country_match = re.findall(r'\b[A-Z]{2}\b', query)
-        print("Possible country code found in query:", country_match)
         try: 
             APIResponse = airportAPI(iata_code, country_match[0])
             data = APIResponse.get("data")
@@ -274,9 +266,7 @@ def predict():
         query = data.get('newMessage')  
         
         city = extractCity(query)
-        # print("Extracted City:", city)
         cityName=city.get("cityName")
-        # print("Extracted City:", cityName)
         if not cityName:
             return jsonify({"error": "City not found in the query. Please mention a valid city."}), 400
                     
@@ -284,13 +274,10 @@ def predict():
         if not currentTemp:
             return jsonify({"error": f"Could not retrieve current temperature for {cityName}."}), 500
         countryCode = currentTemp.get('sys').get('country')
-        # print("Country Code:", countryCode)
         if not countryCode:
             return jsonify({"error": f"Could not determine country for {cityName}."}), 500
         cityCode = getIATACode(cityName, countryCode)
         distanceFromAirport = findDistanceFromAirport(cityCode, countryCode)
-        placesToVisit = placesOfInterest(cityCode, 'en', 'sightseeing')
-        print("Places to Visit:", placesToVisit)
         if not cityCode:
             return jsonify({"error": f"Could not determine IATA code for {cityName}."}), 500
 
@@ -309,8 +296,8 @@ def predict():
                 "longitude": hotel.get("geoCode", {}).get("longitude")
             })
 
-        # print("Hotel Name:", hotelName)
         documents = [
+            f"Information about {cityName}: {fetchCityDetails(cityName)}\n",
             f"Weather in {cityName}: {currentTemp['weather'][0]['main']}, "
             f"Temperature: {round(currentTemp['main']['temp'] - 273, 2)}°C, "
             f"Feels like: {round(currentTemp['main']['feels_like'] - 273, 2)}°C, "
@@ -318,7 +305,6 @@ def predict():
             f"\nHere's the 5-day forecast for {cityName}: {forecast_summary}\n"
             f"Hotel information in city {cityName}: {hotelName}\n",
             f"Distance from airport to hotel in {cityName}: {distanceFromAirport} km\n",
-            f"Places of interest in {city}: {placesToVisit}\n",
         ]
         
         DB_NAME = "weatherdb"
