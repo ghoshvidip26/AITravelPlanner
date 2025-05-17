@@ -18,6 +18,8 @@ from collections import defaultdict
 nlp = spacy.load('en_core_web_sm')
 from datetime import datetime
 import math
+from collections import Counter
+import time
 
 load_dotenv()
 collections.Iterable = collections.abc.Iterable
@@ -112,17 +114,17 @@ def predictFutureTemp(city):
         print("Request failed:", e)
     return temp_map
 
-def flightSearchAPI(): 
+def flightSearchAPI(source,destination,departureDate,returnDate,adults,nonStop): 
     search_url = "https://test.api.amadeus.com/v2/shopping/flight-offers"
     accessToken = obtainAccessToken()
     headers = {"Authorization": f"Bearer {accessToken}"}
     params = {
-        "originLocationCode": "DEL",
-        "destinationLocationCode": "NAG",
-        "departureDate": "2025-06-01",
-        "returnDate": "2025-06-10",
-        "adults": 1,
-        "nonStop": "true",  
+        "originLocationCode": source,
+        "destinationLocationCode": destination,
+        "departureDate": departureDate,
+        "returnDate": returnDate,
+        "adults": adults,
+        "nonStop": nonStop,
         "max": 10
     }
     response = requests.get(search_url, headers=headers, params=params).json()
@@ -258,6 +260,53 @@ def summarize_forecast(temp_map):
         forecast_summary += f"{day}: Average {avg_temp}°C, High {max_temp}°C, Low {min_temp}°C"
 
     return forecast_summary
+
+def fetchNews(query, date_entry): 
+    """ Fetches news articles for a specific query and date """
+    year, month, day = map(int, date_entry.split('-'))
+    date = datetime.date(year, month, day)
+    url = f"https://newsapi.org/v2/everything?q={query}&from={date}&sortBy=publishedAt&apiKey=8f5255313e8b40eaaaec8567a3e3788b"
+    response = requests.get(url)
+    
+    if response.status_code == 200:
+        articles = response.json().get("articles", [])
+        return [article["title"] + ". " + article["description"] for article in articles]
+    else:
+        print("Error fetching news:", response.json())
+        return []
+
+def sentimentAnalysis(text): 
+    prompt = f"""What is the sentiment of the following sentence, which is delimited with triple backticks? Just give the sentiment in one word if it is positive, very positive, negative, very negative or neutral.
+    Review text: ```{text}```
+    """
+    model = genai.GenerativeModel('gemini-1.5-flash')
+    response = model.generate_content(prompt)
+    return response
+
+def assess_safety(news_list):
+    """ Maps sentiment analysis results to a count and displays safety assessment """
+    sentiments = Counter()
+    
+    for index, news in enumerate(news_list):
+        sentiment = sentimentAnalysis(news)
+        sentiments[sentiment.strip()] += 1
+        print(f"Recent news: {news}")
+        print(f"\n --- Sentiment Analysis Summary ---\n{sentiments}")
+        if (index + 1) % 15 == 0:
+            print("⚠️ Rate limit reached, waiting for a minute...")
+            time.sleep(60)  
+            
+    print("\n--- Final Sentiment Analysis Summary ---")
+    for sentiment, count in sentiments.items():
+        print(f"{sentiment}: {count}")
+    
+    print("\n--- Safety Assessment ---")
+    if sentiments['Negative'] > sentiments['Positive']:
+        print("❌ The place does not seem safe based on recent news.")
+    elif sentiments['Neutral'] >= max(sentiments['Positive'], sentiments['Negative']):
+        print("⚠️ The situation seems STABLE but take precautions.")
+    else:
+        print("✅ The place seems safe to visit!")
 
 @app.route('/weather', methods=['POST'])
 def predict():
