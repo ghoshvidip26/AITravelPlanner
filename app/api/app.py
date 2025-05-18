@@ -3,20 +3,21 @@ import os
 import re
 from flask_cors import CORS
 import collections
-from google import genai
+# from google import genai
 from google.genai import types
 from dotenv import load_dotenv
 import requests
-from datetime import datetime
+import datetime
+from datetime import date,datetime
+from dateutil.parser import parse
+import google.generativeai as genai
 import chromadb
 from chromadb import Documents,EmbeddingFunction,Embeddings
 from google.api_core import retry
-from google.genai import types
 is_retriable = lambda e: (isinstance(e, genai.errors.APIError) and e.code in {429, 503})
 import spacy
 from collections import defaultdict
 nlp = spacy.load('en_core_web_sm')
-from datetime import datetime
 import math
 from collections import Counter
 import time
@@ -34,7 +35,8 @@ CORS(app, resources={
     }
 })
 
-client = genai.Client(api_key=os.getenv('GOOGLE_API_KEY'))
+# client = genai.Client(api_key=os.getenv('GOOGLE_API_KEY'))
+genai.configure(api_key=os.getenv('GOOGLE_API_KEY'))
 
 def callAPI(city): 
     url = f"https://api.openweathermap.org/data/2.5/weather?q={city}&appid={os.getenv('OPEN_WEATHER_API_KEY')}"
@@ -57,9 +59,6 @@ def callAPI(city):
     feels_like_c = round(feels_like_k - 273.15, 2)
     humidity = response["main"]["humidity"]
     wind_speed = response["wind"]["speed"]
-
-    sunrise = datetime.fromtimestamp(response["sys"]["sunrise"]).strftime('%H:%M:%S')
-    sunset = datetime.fromtimestamp(response["sys"]["sunset"]).strftime('%H:%M:%S')
     return response
 
 def fetchCityDetails(keyword): 
@@ -105,10 +104,10 @@ def predictFutureTemp(city):
         response = requests.get(url, timeout=10)
         print("Status Code:", response.status_code)
         details = response.json().get("list")
-        for date in details: 
-            timestamp = date["dt"]
+        for forecast in details: 
+            timestamp = forecast["dt"]
             converted_time = datetime.utcfromtimestamp(timestamp).strftime('%Y-%m-%d %H:%M:%S')
-            temp_map[converted_time] = date["main"]["temp"]
+            temp_map[converted_time] = forecast["main"]["temp"]
         
     except requests.exceptions.RequestException as e:
         print("Request failed:", e)
@@ -213,6 +212,15 @@ def predictPrice(departureCity, arrivalCity, departureDate):
     response = requests.get(url, headers=headers, params=querystring)
     return response.json()
 
+def extractDate(query):
+    doc = nlp(query)
+    for ent in doc.ents:
+        if ent.label_ == 'DATE': 
+            print("Extracted DATE:", ent.text)
+            extractedDate = parse(ent.text)
+            formatted_date = extractedDate.strftime('%Y-%m-%d')
+            return {"date": formatted_date}
+        
 def extractCity(query):
     doc = nlp(query)
     for ent in doc.ents:
@@ -262,18 +270,14 @@ def summarize_forecast(temp_map):
     return forecast_summary
 
 def fetchNews(query, date_entry): 
-    """ Fetches news articles for a specific query and date """
     year, month, day = map(int, date_entry.split('-'))
-    date = datetime.date(year, month, day)
-    url = f"https://newsapi.org/v2/everything?q={query}&from={date}&sortBy=publishedAt&apiKey=8f5255313e8b40eaaaec8567a3e3788b"
-    response = requests.get(url)
+    date_obj = date(year, month, day)
+    cityName = extractCity(query).get("cityName")
+    url = f"https://newsapi.org/v2/everything?q={cityName}&from={date_obj}&sortBy=publishedAt&apiKey=8f5255313e8b40eaaaec8567a3e3788b"
     
-    if response.status_code == 200:
-        articles = response.json().get("articles", [])
-        return [article["title"] + ". " + article["description"] for article in articles]
-    else:
-        print("Error fetching news:", response.json())
-        return []
+    print("URL:", url)  
+    response = requests.get(url)
+    return response.json().get("articles")
 
 def sentimentAnalysis(text): 
     prompt = f"""What is the sentiment of the following sentence, which is delimited with triple backticks? Just give the sentiment in one word if it is positive, very positive, negative, very negative or neutral.
@@ -315,6 +319,8 @@ def predict():
         query = data.get('newMessage')  
         
         city = extractCity(query)
+        dateExtract = extractDate(query)
+        print("Date:", dateExtract)
         cityName=city.get("cityName")
         if not cityName:
             return jsonify({"error": "City not found in the query. Please mention a valid city."}), 400
@@ -337,6 +343,10 @@ def predict():
         forecast_summary = summarize_forecast(temp_map)
         hotelsList = hotelAPI(cityCode)
         hotelName = []
+        newsList = fetchNews(query, dateExtract.get("date"))
+        headlines = []
+        for news in newsList:
+            headlines.append(news.get("title"))
         hotel_data = hotelsList.get("data", [])
         for hotel in hotel_data:
             hotelName.append({
@@ -354,6 +364,8 @@ def predict():
             f"\nHere's the 5-day forecast for {cityName}: {forecast_summary}\n"
             f"Hotel information in city {cityName}: {hotelName}\n",
             f"Distance from airport to hotel in {cityName}: {distanceFromAirport} km\n",
+            f"Current news articles related to {cityName} on {dateExtract}: {headlines}\n",
+            f"Based on the recent news articles, the sentiment analysis indicates: {assess_safety(headlines)}\n",
         ]
         
         DB_NAME = "weatherdb"
@@ -388,21 +400,24 @@ def predict():
         for passage in all_passages: 
             passage_oneline = passage.replace("\n", " ")
             prompt += f"PASSAGE: {passage_oneline}\n"
-        
-        answer = client.models.generate_content(model="gemini-2.0-flash", contents=prompt)
+        models = genai.GenerativeModel('gemini-2.0-flash-lite')
+        answer = models.generate_content(prompt)
 
         if not answer or not answer.text:
             return jsonify({"error": "Error generating a response from the AI model."}), 500
 
-        response = jsonify({
-            "city": cityName,
-            "countryCode": countryCode,
-            "currentWeather": currentTemp,
-            "forecastSummary": forecast_summary,
-            "hotels": hotelName,
-            "distanceFromAirport": distanceFromAirport,
-            "answer": answer.text
-        })
+        response_data = {
+            "city": cityName or "Unknown City",
+            "countryCode": countryCode or "Unknown Country",
+            "currentWeather": currentTemp or {},
+            "forecastSummary": forecast_summary or "No Forecast Available",
+            "hotels": hotelName or [],
+            "distanceFromAirport": distanceFromAirport or "N/A",
+            "news": headlines or [],
+            "sentimentAnalysis": assess_safety(headlines) or "No Analysis Available",
+            "answer": answer.text if answer and answer.text else "No answer generated"
+        }
+        response = jsonify(response_data)
         return response
 
     except Exception as e:
