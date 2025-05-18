@@ -3,7 +3,6 @@ import os
 import re
 from flask_cors import CORS
 import collections
-# from google import genai
 from google.genai import types
 from dotenv import load_dotenv
 import requests
@@ -35,7 +34,6 @@ CORS(app, resources={
     }
 })
 
-# client = genai.Client(api_key=os.getenv('GOOGLE_API_KEY'))
 genai.configure(api_key=os.getenv('GOOGLE_API_KEY'))
 
 def callAPI(city): 
@@ -88,7 +86,7 @@ class GeminiEmbeddingFunction(EmbeddingFunction):
     def __call__(self, input: Documents) -> Embeddings: 
         embedding_task = "retrieval_document" if self.document_mode else "retrieval_query"
 
-        response = client.models.embed_content(
+        response = genai.models.embed_content(
             model="models/text-embedding-004",
             contents=input,
             config=types.EmbedContentConfig(
@@ -154,13 +152,45 @@ def airportAPI(cityName, countryCode):
     response = requests.get(url, headers=headers).json()
     return response
 
+# def getIATACode(cityName, countryCode):
+#     try:
+#         data = airportAPI(cityName, countryCode)
+#         if not data or not data.get("data") or len(data.get("data", [])) == 0:
+#             print(f"No data found for city: {cityName}, country: {countryCode}")
+#             return None
+            
+#         location = data.get("data")[0]
+#         if not location:
+#             print("No location data found")
+#             return None
+            
+#         if location.get("subType") == "CITY":
+#             iataCode = location.get("address", {}).get("cityCode")
+#         else:
+#             iataCode = location.get("address", {}).get("countryCode")
+            
+#         if not iataCode:
+#             print("No IATA code found")
+#             return None
+            
+#         return iataCode
+#     except Exception as e:
+#         print(f"Error getting IATA code: {str(e)}")
+#         return None
+
 def getIATACode(cityName, countryCode):
     data = airportAPI(cityName, countryCode)
-    location = data.get("data")[0]
+    print("Data:", data)
+    if data and len(data) > 0:
+        location = data.get("data")[0]
+    else:
+        print("No data found")
+    print("Location:", location)
     if location.get("subType")=="CITY": 
         iataCode = location.get("address").get("cityCode")
     else: 
         iataCode = location.get("address").get("countryCode")
+    print("IATA Code:", iataCode)
     return iataCode
 
 def distance(origin, destination):
@@ -180,23 +210,26 @@ def distance(origin, destination):
 def findDistanceFromAirport(cityCode, countryCode): 
     hotels = hotelAPI(cityCode)
     airport = airportAPI(cityCode,countryCode)
-
-    airportGeoCode = airport.get("data")[0].get("geoCode")
-    airport_coords = (airportGeoCode['latitude'], airportGeoCode['longitude'])
-
+    airportGeoCode = {}
+    if len(airport) > 0: 
+        for x in airport.get("data"): 
+            airportGeoCode = x.get("geoCode")
+    airport_coords = (airportGeoCode.get("latitude"), airportGeoCode.get("longitude"))
+    # print(airport_coords)
     tempMap = {}
-    for hotel in hotels.get("data", []):
-        name = hotel.get("name")
-        geoCode = hotel.get("geoCode")
-        if name and geoCode:
-            tempMap[name] = geoCode
+    hotelGeoCode = {}
+    for hotel in hotels.get("data"): 
+        if len(hotel) > 0: 
+            hotelGeoCode = hotel.get("geoCode")
+            hotelName = hotel.get("name")
+            if hotelName and hotelGeoCode: 
+                tempMap[hotelName] = hotelGeoCode
     distance_data = {}
-    for name, geo in tempMap.items():
-        hotel_coords = (geo['latitude'], geo['longitude'])
+    for name, geo in tempMap.items(): 
+        hotel_coords = (geo.get("latitude"), geo.get("longitude"))
         d = distance(airport_coords, hotel_coords)
-        print(f"{name}: {d:.2f} km from airport")
-        distance_data[name]=d
-    return distance_data        
+        distance_data[name] = d
+    return distance_data  
 
 def predictPrice(departureCity, arrivalCity, departureDate): 
     url = "https://booking-com18.p.rapidapi.com/flights/v2/min-price-oneway"
@@ -285,32 +318,42 @@ def sentimentAnalysis(text):
     """
     model = genai.GenerativeModel('gemini-1.5-flash')
     response = model.generate_content(prompt)
-    return response
+    return response.text.strip() if response.text else "neutral"
 
 def assess_safety(news_list):
     """ Maps sentiment analysis results to a count and displays safety assessment """
+    if not news_list:
+        return "No recent news available for safety assessment"
+        
     sentiments = Counter()
     
     for index, news in enumerate(news_list):
-        sentiment = sentimentAnalysis(news)
-        sentiments[sentiment.strip()] += 1
-        print(f"Recent news: {news}")
-        print(f"\n --- Sentiment Analysis Summary ---\n{sentiments}")
-        if (index + 1) % 15 == 0:
-            print("⚠️ Rate limit reached, waiting for a minute...")
-            time.sleep(60)  
+        try:
+            sentiment = sentimentAnalysis(news)
+            sentiments[sentiment] += 1
+            print(f"Recent news: {news}")
+            print(f"\n --- Sentiment Analysis Summary ---\n{sentiments}")
+            if (index + 1) % 15 == 0:
+                print("⚠️ Rate limit reached, waiting for a minute...")
+                time.sleep(60)  
+        except Exception as e:
+            print(f"Error analyzing sentiment for news item: {e}")
+            continue
             
     print("\n--- Final Sentiment Analysis Summary ---")
     for sentiment, count in sentiments.items():
         print(f"{sentiment}: {count}")
     
+    if not sentiments:
+        return "Unable to perform sentiment analysis on available news"
+    
     print("\n--- Safety Assessment ---")
-    if sentiments['Negative'] > sentiments['Positive']:
-        print("❌ The place does not seem safe based on recent news.")
-    elif sentiments['Neutral'] >= max(sentiments['Positive'], sentiments['Negative']):
-        print("⚠️ The situation seems STABLE but take precautions.")
+    if sentiments.get('Negative', 0) > sentiments.get('Positive', 0):
+        return "❌ The place does not seem safe based on recent news."
+    elif sentiments.get('Neutral', 0) >= max(sentiments.get('Positive', 0), sentiments.get('Negative', 0)):
+        return "⚠️ The situation seems STABLE but take precautions."
     else:
-        print("✅ The place seems safe to visit!")
+        return "✅ The place seems safe to visit!"
 
 @app.route('/weather', methods=['POST'])
 def predict():
@@ -320,21 +363,36 @@ def predict():
         
         city = extractCity(query)
         dateExtract = extractDate(query)
-        print("Date:", dateExtract)
-        cityName=city.get("cityName")
+        print("Date:", dateExtract.get("date"))
+        cityName = city.get("cityName")
+        print("City Name:", city)
         if not cityName:
             return jsonify({"error": "City not found in the query. Please mention a valid city."}), 400
                     
         currentTemp = callAPI(cityName)
+        print("Current Temperature:", currentTemp)
         if not currentTemp:
             return jsonify({"error": f"Could not retrieve current temperature for {cityName}."}), 500
-        countryCode = currentTemp.get('sys').get('country')
+            
+        countryCode = currentTemp.get('sys', {}).get('country')
+        print("Country Code:", countryCode)
         if not countryCode:
             return jsonify({"error": f"Could not determine country for {cityName}."}), 500
+            
         cityCode = getIATACode(cityName, countryCode)
-        distanceFromAirport = findDistanceFromAirport(cityCode, countryCode)
+        print("City Code:", cityCode)
         if not cityCode:
-            return jsonify({"error": f"Could not determine IATA code for {cityName}."}), 500
+            return jsonify({
+                "error": f"Could not determine IATA code for {cityName}. Some features may be limited.",
+                "city": cityName,
+                "countryCode": countryCode,
+                "currentWeather": currentTemp,
+                "forecastSummary": summarize_forecast(predictFutureTemp(cityName)) if predictFutureTemp(cityName) else "No forecast available"
+            }), 200
+
+        distanceFromAirport = findDistanceFromAirport(cityCode, countryCode)
+        for hotel, distance in distanceFromAirport.items():
+            print(f"Hotel: {hotel}, Distance from Airport: {distance} km")
 
         temp_map = predictFutureTemp(cityName)
         if not temp_map:
@@ -348,13 +406,14 @@ def predict():
         for news in newsList:
             headlines.append(news.get("title"))
         hotel_data = hotelsList.get("data", [])
+        print("Headlines:", headlines)
         for hotel in hotel_data:
             hotelName.append({
                 "name": hotel.get("name"),
                 "latitude": hotel.get("geoCode", {}).get("latitude"),
                 "longitude": hotel.get("geoCode", {}).get("longitude")
             })
-
+        print("Hotel Name:", hotelName)
         documents = [
             f"Information about {cityName}: {fetchCityDetails(cityName)}\n",
             f"Weather in {cityName}: {currentTemp['weather'][0]['main']}, "
@@ -384,8 +443,11 @@ def predict():
         
         # Query Chroma DB for relevant passage based on user input
         result = db.query(query_texts=[query], n_results=1)
-        [all_passages] = result["documents"]
-        
+        if result.get("documents") and len(result["documents"]) > 0:
+            [all_passages] = result["documents"]
+        else:
+            all_passages = ["No relevant information found in the database for the query."]
+                
         query_oneline = query.replace("\n", " ")
         
         prompt = f"""
@@ -400,10 +462,10 @@ def predict():
         for passage in all_passages: 
             passage_oneline = passage.replace("\n", " ")
             prompt += f"PASSAGE: {passage_oneline}\n"
-        models = genai.GenerativeModel('gemini-2.0-flash-lite')
-        answer = models.generate_content(prompt)
+        model = genai.GenerativeModel('gemini-2.0-flash-lite')
+        response = model.generate_content(prompt)
 
-        if not answer or not answer.text:
+        if not response or not response.text:
             return jsonify({"error": "Error generating a response from the AI model."}), 500
 
         response_data = {
@@ -415,10 +477,10 @@ def predict():
             "distanceFromAirport": distanceFromAirport or "N/A",
             "news": headlines or [],
             "sentimentAnalysis": assess_safety(headlines) or "No Analysis Available",
-            "answer": answer.text if answer and answer.text else "No answer generated"
+            "answer": response.text if response and response.text else "No answer generated"
         }
-        response = jsonify(response_data)
-        return response
+        # response = 
+        return jsonify(response_data)
 
     except Exception as e:
         print(f"Error processing request: {str(e)}")
