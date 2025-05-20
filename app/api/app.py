@@ -13,7 +13,7 @@ import google.generativeai as genai
 import chromadb
 from chromadb import Documents,EmbeddingFunction,Embeddings
 from google.api_core import retry
-is_retriable = lambda e: (isinstance(e, genai.errors.APIError) and e.code in {429, 503})
+is_retriable = lambda e: (isinstance(e, requests.exceptions.HTTPError) and e.response.status_code in {429, 503})
 import spacy
 from collections import defaultdict
 nlp = spacy.load('en_core_web_sm')
@@ -39,25 +39,26 @@ genai.configure(api_key=os.getenv('GOOGLE_API_KEY'))
 def callAPI(city): 
     url = f"https://api.openweathermap.org/data/2.5/weather?q={city}&appid={os.getenv('OPEN_WEATHER_API_KEY')}"
     response = requests.get(url).json()
-
-    if response.get("cod") != 200:
-        print("Error:", response.get("message", "Unknown error"))
-        return None
-
-    name = response.get("name", city)
-    country = response["sys"].get("country", "")
-    weather_desc = response["weather"][0].get("description", "").title()
-    
-    lat = response["coord"]["lat"]
-    lon = response["coord"]["lon"]
-
-    temp_k = response["main"]["temp"]
-    feels_like_k = response["main"]["feels_like"]
-    temp_c = round(temp_k - 273.15, 2)
-    feels_like_c = round(feels_like_k - 273.15, 2)
-    humidity = response["main"]["humidity"]
-    wind_speed = response["wind"]["speed"]
+    print("Response:", response)
     return response
+    # if response.get("cod") != 200:
+    #     print("Error:", response.get("message", "Unknown error"))
+    #     return None
+    # print("Response:", response)
+    # name = response.get("name", city)
+    # country = response["sys"].get("country", "")
+    # weather_desc = response["weather"][0].get("description", "").title()
+    
+    # lat = response["coord"]["lat"]
+    # lon = response["coord"]["lon"]
+
+    # temp_k = response["main"]["temp"]
+    # feels_like_k = response["main"]["feels_like"]
+    # temp_c = round(temp_k - 273.15, 2)
+    # feels_like_c = round(feels_like_k - 273.15, 2)
+    # humidity = response["main"]["humidity"]
+    # wind_speed = response["wind"]["speed"]
+    # return response
 
 def fetchCityDetails(keyword): 
     URL = "https://test.api.amadeus.com/v1/reference-data/locations"
@@ -71,12 +72,12 @@ def fetchCityDetails(keyword):
     }
     
     response = requests.get(URL, headers=headers, params=params)
-
-    if response.status_code == 200:
-        return response.json()
-    else:
-        print(f"Failed to fetch data. Status Code: {response.status_code}, Response: {response.text}")
-        return None
+    data = response.json()
+    location = data.get("data")
+    return {
+        "cities": [c for c in location if c.get("subType") == "CITY"],
+        "airports": [c for c in location if c.get("subType") == "AIRPORT"]
+    }
 
 class GeminiEmbeddingFunction(EmbeddingFunction): 
     def __init__(self, document_mode=True):
@@ -86,14 +87,12 @@ class GeminiEmbeddingFunction(EmbeddingFunction):
     def __call__(self, input: Documents) -> Embeddings: 
         embedding_task = "retrieval_document" if self.document_mode else "retrieval_query"
 
-        response = genai.models.embed_content(
+        response = genai.embed_content(
             model="models/text-embedding-004",
-            contents=input,
-            config=types.EmbedContentConfig(
-                task_type=embedding_task
-            ),
+            content=input,
+            task_type=embedding_task
         )
-        return [e.values for e in response.embeddings]
+        return response["embedding"]
 
 def predictFutureTemp(city): 
     temp_map = {}
@@ -102,6 +101,7 @@ def predictFutureTemp(city):
         response = requests.get(url, timeout=10)
         print("Status Code:", response.status_code)
         details = response.json().get("list")
+        # print("Details:", details)
         for forecast in details: 
             timestamp = forecast["dt"]
             converted_time = datetime.utcfromtimestamp(timestamp).strftime('%Y-%m-%d %H:%M:%S')
@@ -143,6 +143,7 @@ def hotelAPI(cityCode):
     accessToken = obtainAccessToken()
     headers = {"Authorization": f"Bearer {accessToken}"}
     response = requests.get(url, headers=headers).json()
+    # print("Hotel API Response:", response)
     return response
 
 def airportAPI(cityName, countryCode): 
@@ -150,33 +151,8 @@ def airportAPI(cityName, countryCode):
     accessToken = obtainAccessToken()
     headers = {"Authorization": f"Bearer {accessToken}"}
     response = requests.get(url, headers=headers).json()
+    # print("Airport API Response:", response)
     return response
-
-# def getIATACode(cityName, countryCode):
-#     try:
-#         data = airportAPI(cityName, countryCode)
-#         if not data or not data.get("data") or len(data.get("data", [])) == 0:
-#             print(f"No data found for city: {cityName}, country: {countryCode}")
-#             return None
-            
-#         location = data.get("data")[0]
-#         if not location:
-#             print("No location data found")
-#             return None
-            
-#         if location.get("subType") == "CITY":
-#             iataCode = location.get("address", {}).get("cityCode")
-#         else:
-#             iataCode = location.get("address", {}).get("countryCode")
-            
-#         if not iataCode:
-#             print("No IATA code found")
-#             return None
-            
-#         return iataCode
-#     except Exception as e:
-#         print(f"Error getting IATA code: {str(e)}")
-#         return None
 
 def getIATACode(cityName, countryCode):
     data = airportAPI(cityName, countryCode)
@@ -231,19 +207,19 @@ def findDistanceFromAirport(cityCode, countryCode):
         distance_data[name] = d
     return distance_data  
 
-def predictPrice(departureCity, arrivalCity, departureDate): 
-    url = "https://booking-com18.p.rapidapi.com/flights/v2/min-price-oneway"
-    querystring={
-        "departId":departureCity,
-        "arrivalId":arrivalCity,
-        "departDate":departureDate
-    }
-    headers = {
-        "x-rapidapi-key": "dc66c7ea2emsha6c7a2e618149d4p17da80jsn5c1e1cd8cb27",
-        "x-rapidapi-host": "booking-com18.p.rapidapi.com"
-    }
-    response = requests.get(url, headers=headers, params=querystring)
-    return response.json()
+# def predictPrice(departureCity, arrivalCity, departureDate): 
+#     url = "https://booking-com18.p.rapidapi.com/flights/v2/min-price-oneway"
+#     querystring={
+#         "departId":departureCity,
+#         "arrivalId":arrivalCity,
+#         "departDate":departureDate
+#     }
+#     headers = {
+#         "x-rapidapi-key": "dc66c7ea2emsha6c7a2e618149d4p17da80jsn5c1e1cd8cb27",
+#         "x-rapidapi-host": "booking-com18.p.rapidapi.com"
+#     }
+#     response = requests.get(url, headers=headers, params=querystring)
+#     return response.json()
 
 def extractDate(query):
     doc = nlp(query)
@@ -252,21 +228,26 @@ def extractDate(query):
             print("Extracted DATE:", ent.text)
             extractedDate = parse(ent.text)
             formatted_date = extractedDate.strftime('%Y-%m-%d')
+            print("Formatted Date:", formatted_date)
             return {"date": formatted_date}
         
 def extractCity(query):
     doc = nlp(query)
+    print("Query:", query)
     for ent in doc.ents:
         if ent.label_ == 'GPE':
             print("Extracted GPE:", ent.text)
             return {"cityName": ent.text}
     iata_code_match = re.findall(r'\b[A-Z]{3}\b', query)
+    print("IATA Code Match:", iata_code_match)
     if iata_code_match:
         iata_code = iata_code_match[0]
         country_match = re.findall(r'\b[A-Z]{2}\b', query)
+        print("Country Code Match:", country_match)
         try: 
             APIResponse = airportAPI(iata_code, country_match[0])
             data = APIResponse.get("data")
+            print("API Response Data:", data)
             for location in data:
                 address=location.get("address")
                 return address
@@ -303,6 +284,8 @@ def summarize_forecast(temp_map):
     return forecast_summary
 
 def fetchNews(query, date_entry): 
+    if not date_entry: 
+        return None
     year, month, day = map(int, date_entry.split('-'))
     date_obj = date(year, month, day)
     cityName = extractCity(query).get("cityName")
@@ -362,25 +345,28 @@ def predict():
         query = data.get('newMessage')  
         
         city = extractCity(query)
-        dateExtract = extractDate(query)
-        print("Date:", dateExtract.get("date"))
+        
         cityName = city.get("cityName")
-        print("City Name:", city)
+        
+        currentTemp = callAPI(cityName)
+        
+        countryCode = currentTemp.get('sys', {}).get('country')
+        
+        cityCode = getIATACode(cityName, countryCode)
+       
+        dateExtract = extractDate(query) or {}
+        cityInfo = fetchCityDetails(cityName)
+        print("City Info:", cityInfo)
+        
         if not cityName:
             return jsonify({"error": "City not found in the query. Please mention a valid city."}), 400
                     
-        currentTemp = callAPI(cityName)
-        print("Current Temperature:", currentTemp)
         if not currentTemp:
             return jsonify({"error": f"Could not retrieve current temperature for {cityName}."}), 500
             
-        countryCode = currentTemp.get('sys', {}).get('country')
-        print("Country Code:", countryCode)
         if not countryCode:
             return jsonify({"error": f"Could not determine country for {cityName}."}), 500
             
-        cityCode = getIATACode(cityName, countryCode)
-        print("City Code:", cityCode)
         if not cityCode:
             return jsonify({
                 "error": f"Could not determine IATA code for {cityName}. Some features may be limited.",
@@ -401,21 +387,20 @@ def predict():
         forecast_summary = summarize_forecast(temp_map)
         hotelsList = hotelAPI(cityCode)
         hotelName = []
-        newsList = fetchNews(query, dateExtract.get("date"))
+        newsList = fetchNews(query, dateExtract.get("date")) or {}
+        
         headlines = []
         for news in newsList:
             headlines.append(news.get("title"))
         hotel_data = hotelsList.get("data", [])
-        print("Headlines:", headlines)
         for hotel in hotel_data:
             hotelName.append({
                 "name": hotel.get("name"),
                 "latitude": hotel.get("geoCode", {}).get("latitude"),
                 "longitude": hotel.get("geoCode", {}).get("longitude")
             })
-        print("Hotel Name:", hotelName)
         documents = [
-            f"Information about {cityName}: {fetchCityDetails(cityName)}\n",
+            f"Information about {cityName}: {cityInfo}\n",
             f"Weather in {cityName}: {currentTemp['weather'][0]['main']}, "
             f"Temperature: {round(currentTemp['main']['temp'] - 273, 2)}°C, "
             f"Feels like: {round(currentTemp['main']['feels_like'] - 273, 2)}°C, "
@@ -470,6 +455,7 @@ def predict():
 
         response_data = {
             "city": cityName or "Unknown City",
+            "cityInfo": cityInfo or "No City Information Available",
             "countryCode": countryCode or "Unknown Country",
             "currentWeather": currentTemp or {},
             "forecastSummary": forecast_summary or "No Forecast Available",
@@ -479,7 +465,6 @@ def predict():
             "sentimentAnalysis": assess_safety(headlines) or "No Analysis Available",
             "answer": response.text if response and response.text else "No answer generated"
         }
-        # response = 
         return jsonify(response_data)
 
     except Exception as e:
