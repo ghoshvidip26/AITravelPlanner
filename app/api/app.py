@@ -355,8 +355,22 @@ def predict():
         cityCode = getIATACode(cityName, countryCode)
        
         dateExtract = extractDate(query) or {}
-        cityInfo = fetchCityDetails(cityName)
-        print("City Info:", cityInfo)
+        city = fetchCityDetails(cityName)
+        cityInfo = city.get("cities")[0]
+        print("City Info: ",cityInfo)
+
+        cityAirport = city.get("airports")
+        airportList = []
+        for c in cityAirport: 
+            airportList.append({
+                "name": c.get("name"),
+                "timeZoneOffset": c.get("timeZoneOffset"),
+                "address": c.get("address"),
+                "IATA Code": c.get("iataCode"),
+                "Country Code":c.get("address").get("countryCode"),
+                "State Code": c.get("address").get("stateCode"),
+                "Region Code": c.get("address").get("regionCode")
+            })
         
         if not cityName:
             return jsonify({"error": "City not found in the query. Please mention a valid city."}), 400
@@ -400,7 +414,7 @@ def predict():
                 "longitude": hotel.get("geoCode", {}).get("longitude")
             })
         documents = [
-            f"Information about {cityName}: {cityInfo}\n",
+            f"Information about {cityName}: {airportList}\n",
             f"Weather in {cityName}: {currentTemp['weather'][0]['main']}, "
             f"Temperature: {round(currentTemp['main']['temp'] - 273, 2)}°C, "
             f"Feels like: {round(currentTemp['main']['feels_like'] - 273, 2)}°C, "
