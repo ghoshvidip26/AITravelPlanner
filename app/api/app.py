@@ -371,7 +371,7 @@ def predict():
                 "State Code": c.get("address").get("stateCode"),
                 "Region Code": c.get("address").get("regionCode")
             })
-        
+        print("Airport List: ", airportList)
         if not cityName:
             return jsonify({"error": "City not found in the query. Please mention a valid city."}), 400
                     
@@ -469,7 +469,7 @@ def predict():
 
         response_data = {
             "city": cityName or "Unknown City",
-            "cityInfo": cityInfo or "No City Information Available",
+            "cityInfo": cityInfo,
             "countryCode": countryCode or "Unknown Country",
             "currentWeather": currentTemp or {},
             "forecastSummary": forecast_summary or "No Forecast Available",
