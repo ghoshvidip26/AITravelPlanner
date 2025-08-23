@@ -328,7 +328,8 @@ def assess_safety(news_list):
 def predict():
     try:
         data = request.get_json()
-        query = data.get('newMessage')  
+        print("Request Data:", data)
+        query = data.get('message')
         
         city = extractCity(query)
         
