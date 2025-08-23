@@ -41,24 +41,6 @@ def callAPI(city):
     response = requests.get(url).json()
     print("Response:", response)
     return response
-    # if response.get("cod") != 200:
-    #     print("Error:", response.get("message", "Unknown error"))
-    #     return None
-    # print("Response:", response)
-    # name = response.get("name", city)
-    # country = response["sys"].get("country", "")
-    # weather_desc = response["weather"][0].get("description", "").title()
-    
-    # lat = response["coord"]["lat"]
-    # lon = response["coord"]["lon"]
-
-    # temp_k = response["main"]["temp"]
-    # feels_like_k = response["main"]["feels_like"]
-    # temp_c = round(temp_k - 273.15, 2)
-    # feels_like_c = round(feels_like_k - 273.15, 2)
-    # humidity = response["main"]["humidity"]
-    # wind_speed = response["wind"]["speed"]
-    # return response
 
 def fetchCityDetails(keyword): 
     URL = "https://test.api.amadeus.com/v1/reference-data/locations"
@@ -129,6 +111,9 @@ def flightSearchAPI(source,destination,departureDate,returnDate,adults,nonStop):
 
 def obtainAccessToken(): 
     url = "https://test.api.amadeus.com/v1/security/oauth2/token"
+    print("Requesting access token...")
+    print("API Secret:", os.getenv('AMEDUS_API_SECRET'))
+    print("API Key:", os.getenv('AMEDUS_API_KEY'))
     payload = {
         "grant_type": "client_credentials",
         "client_id": os.getenv('AMEDUS_API_KEY'),          
@@ -136,6 +121,7 @@ def obtainAccessToken():
     }
     headers = {"Content-Type": "application/x-www-form-urlencoded"}
     response = requests.post(url, data=payload, headers=headers).json()
+    print("Access Token Response:", response.get("access_token"))
     return response.get("access_token")
 
 def hotelAPI(cityCode): 
